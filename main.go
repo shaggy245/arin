@@ -8,31 +8,64 @@ import (
     "os"
     "errors"
     "strconv"
+    "encoding/json"
 )
 
-func queryPOC(c *http.Client, poc string) (string, error) {
+func queryPOC(c *http.Client, poc string) ([]string, error) {
     // Get ARIN NET cods for ARIN POC
     path := "/org/" + poc + "/nets"
     req, err := http.NewRequest("GET", "https://whois.arin.net/rest" + path, nil)
     if err != nil {
-        return "", err
+        return nil, err
     }
     req.Header.Add("accept", "application/json")
     resp, err := c.Do(req)
     if err != nil {
-        return "", err
+        return nil, err
     }
     defer resp.Body.Close()
     body, err := ioutil.ReadAll(resp.Body)
     if err != nil {
-        return "", err
+        return nil, err
     }
     if resp.StatusCode == 404 {
-        return "", errors.New("ARIN POC not found or no networks found for " + poc)
+        return nil, errors.New("ARIN POC not found or no networks found for " + poc)
     } else if resp.StatusCode != 200 {
-        return "", errors.New("Non-200 status code received: " + strconv.Itoa(resp.StatusCode))
+        return nil, errors.New("Non-200 status code received: " + strconv.Itoa(resp.StatusCode))
     }
-    return string(body), nil
+
+    nets, err := extractPOCNets(body)
+    if err != nil {
+        return nil, err
+    }
+    return nets, nil
+}
+
+func extractPOCNets(body []byte) ([]string, error) {
+    argnets := make(map[string]map[string]interface{})
+    err := json.Unmarshal(body, &argnets)
+    if err != nil {
+        return nil, err
+    }
+    nets := make([]string, 1)
+    //netrefs can be a single map or an array of maps
+    switch netrefs := argnets["nets"]["netRef"].(type) {
+    case map[string]interface{}:
+	nets[0] = netrefs["@handle"].(string)
+    case []interface{}:
+        nets = make([]string, len(netrefs))
+	for i := 0; i < len(netrefs); i++ {
+	    netref := netrefs[i].(map[string]interface{})
+	    nets[i] = netref["@handle"].(string)
+	}
+    default:
+        return nil, errors.New("Unknown netRef var type in json response")
+    }
+    return nets, nil
+}
+
+func queryNets(c *http.Client, netrefs []string) ([]string, error) {
+    return nil, nil
 }
 
 func main() {
