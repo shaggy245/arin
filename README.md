@@ -5,7 +5,7 @@ https://www.arin.net/resources/registry/whois/rws/api/
 
 ## Install
 ```
-go get -d github.com/shaggy245/arin-nets
+go get -d github.com/shaggy245/arin
 ```
 
 ## Usage
