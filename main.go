@@ -11,10 +11,9 @@ import (
     "encoding/json"
 )
 
-func queryPOC(c *http.Client, poc string) ([]string, error) {
-    // Get ARIN NET cods for ARIN POC
-    path := "/org/" + poc + "/nets"
-    req, err := http.NewRequest("GET", "https://whois.arin.net/rest" + path, nil)
+func queryARIN(c *http.Client, path string) ([]byte, error) {
+    // Get ARIN cods
+    req, err := http.NewRequest("GET", "https://whois.arin.net" + path, nil)
     if err != nil {
         return nil, err
     }
@@ -29,16 +28,12 @@ func queryPOC(c *http.Client, poc string) ([]string, error) {
         return nil, err
     }
     if resp.StatusCode == 404 {
-        return nil, errors.New("ARIN POC not found or no networks found for " + poc)
+        return nil, errors.New("ARIN resource not found: " + path)
     } else if resp.StatusCode != 200 {
         return nil, errors.New("Non-200 status code received: " + strconv.Itoa(resp.StatusCode))
     }
 
-    nets, err := extractPOCNets(body)
-    if err != nil {
-        return nil, err
-    }
-    return nets, nil
+    return body, nil
 }
 
 func extractPOCNets(body []byte) ([]string, error) {
@@ -64,8 +59,31 @@ func extractPOCNets(body []byte) ([]string, error) {
     return nets, nil
 }
 
-func queryNets(c *http.Client, netrefs []string) ([]string, error) {
-    return nil, nil
+func extractCIDR(body []byte) ([]string, error) {
+    argnets := make(map[string]map[string]interface{})
+    err := json.Unmarshal(body, &argnets)
+    if err != nil {
+        return nil, err
+    }
+    nets := make([]string, 1)
+    //netblocks can be a single map or an array of maps
+    switch netblocks := argnets["net"]["netBlocks"].(map[string]interface{})["netBlock"].(type) {
+    case map[string]interface{}:
+        startAddr := netblocks["startAddress"].(map[string]interface{})["$"].(string)
+        cidr := netblocks["cidrLength"].(map[string]interface{})["$"].(string)
+	nets[0] = startAddr + "/" + cidr
+    case []interface{}:
+        nets = make([]string, len(netblocks))
+	for i := 0; i < len(netblocks); i++ {
+	    netblock := netblocks[i].(map[string]interface{})
+            startAddr := netblock["startAddress"].(map[string]interface{})["$"].(string)
+            cidr := netblock["cidrLength"].(map[string]interface{})["$"].(string)
+	    nets[i] = startAddr + "/" + cidr
+	}
+    default:
+        return nil, errors.New("Unknown netBlock var type in json response")
+    }
+    return nets, nil
 }
 
 func main() {
@@ -82,9 +100,32 @@ func main() {
     */
 
     client := &http.Client{}
-    nets, err := queryPOC(client, handle)
+    pathPOC := "/rest/org/" + handle + "/nets"
+    pocBody, err := queryARIN(client, pathPOC)
     if err != nil {
         log.Fatal(err)
     }
-    fmt.Println(nets)
+    nets, err := extractPOCNets(pocBody)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    netCIDRs := make([]string, 0)
+    for i := 0; i < len(nets); i++ {
+        cidrBody, err := queryARIN(client, "/rest/net/" + nets[i])
+        if err != nil {
+            log.Fatal(err)
+        }
+        netCIDR, err := extractCIDR(cidrBody)
+        if err != nil {
+            fmt.Println("ugh")
+            log.Fatal(err)
+        }
+        netCIDRs = append(netCIDRs, netCIDR...)
+    }
+    jsonNetCIDRs, err := json.Marshal(netCIDRs)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println(string(jsonNetCIDRs))
 }
