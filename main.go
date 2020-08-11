@@ -118,7 +118,6 @@ func main() {
         }
         netCIDR, err := extractCIDR(cidrBody)
         if err != nil {
-            fmt.Println("ugh")
             log.Fatal(err)
         }
         netCIDRs = append(netCIDRs, netCIDR...)
